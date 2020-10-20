@@ -49,7 +49,6 @@ namespace SC2Abathur.Modules.Tactics
             // Register callback to check if our build is done
             intelManager.Handler.RegisterHandler(Case.UnitAddedSelf, CheckOpeningCompleted);
 
-
             // Init Production!
             productionManager.QueueUnit(Unit.SCV); // 13
             productionManager.QueueUnit(Unit.SCV); // 14
@@ -80,6 +79,7 @@ namespace SC2Abathur.Modules.Tactics
         public void OnRestart()
         {
             Completed = false;
+            intelManager.Handler.DeregisterHandler(CheckOpeningCompleted);
         }
 
         public void OnAdded() => OnStart();
@@ -88,6 +88,7 @@ namespace SC2Abathur.Modules.Tactics
 
         public void CheckOpeningCompleted(IUnit unit)
         {
+            // TODO: Potentially rush-vulnerable hardcoded check
             bool SCVs = intelManager.UnitsSelf(Unit.SCV).Count() >= 16;
             bool barracks = intelManager.UnitsSelf(Unit.Barracks).Count() >= 2;
             bool supplyDepots = intelManager.UnitsSelf(Unit.SupplyDepot).Count() >= 2;

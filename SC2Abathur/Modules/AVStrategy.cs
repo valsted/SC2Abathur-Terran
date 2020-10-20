@@ -28,12 +28,14 @@ namespace SC2Abathur.Modules {
         private readonly ISquadRepository squadRepo;
 
         // Tactical modules
+        private List<IReplaceableModule> activeTactics;
         private OpenerModule openerModule;
+        private AttackModule attackModule;
         // TODO: Add
 
         public AVStrategy(IAbathur abathur, IIntelManager intelManager, ICombatManager combatManager, 
             IProductionManager productionManager, ISquadRepository squadRep,
-            OpenerModule openerModule)
+            OpenerModule openerModule, AttackModule attackModule)
         {
             this.abathur = abathur;
             this.intelManager = intelManager;
@@ -43,17 +45,23 @@ namespace SC2Abathur.Modules {
 
             // Tactics
             this.openerModule = openerModule;
+            this.attackModule = attackModule;
         }
 
         #region Framework hooks
 
         // Called after connection is established to the StarCraft II Client, but before a game is entered.
-        public void Initialize() {}
+        public void Initialize() {
+            activeTactics = new List<IReplaceableModule>();
+        }
 
         // Called on the first frame in each game.
         public void OnStart()
         {
             FindStartingLocations();
+            attackModule.enemyPositions = enemyStartLocations;
+
+            AddTactic(openerModule);
         }
 
 
@@ -61,16 +69,19 @@ namespace SC2Abathur.Modules {
         // This method is called asynchronous if the framework IsParallelized is true in the setup file.
         public void OnStep() 
         {
+            // TODO: switch to 
             switch (strategy)
             {
                 case Strategy.Opener:
                     if (openerModule.Completed)
+                    {
+                        RemoveTactic(openerModule);
+                        AddTactic(attackModule);
                         strategy = Strategy.Aggression;
-                    else
-                        abathur.AddToGameloop(openerModule);
+                    }
                     break;
                 case Strategy.Aggression:
-                    Console.WriteLine("I'm aggressive!");
+                    // We just stay here...
                     break;
             }
         }
@@ -91,6 +102,18 @@ namespace SC2Abathur.Modules {
         {
             // Colonies marked with starting location are possible starting locations of the enemy, never yourself
             enemyStartLocations = intelManager.Colonies.Where(c => c.IsStartingLocation);
+        }
+
+        private void AddTactic(IReplaceableModule tactic)
+        {
+            activeTactics.Add(tactic);
+            abathur.AddToGameloop(tactic);
+        }
+
+        private void RemoveTactic(IReplaceableModule tactic)
+        {
+            activeTactics.Remove(tactic);
+            abathur.RemoveFromGameloop(tactic);
         }
     }
 
