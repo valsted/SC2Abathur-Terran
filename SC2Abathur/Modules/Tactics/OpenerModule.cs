@@ -48,6 +48,8 @@ namespace SC2Abathur.Modules.Tactics
         {
             // Register callback to check if our build is done
             intelManager.Handler.RegisterHandler(Case.UnitAddedSelf, CheckOpeningCompleted);
+            intelManager.Handler.RegisterHandler(Case.StructureAddedSelf, CheckOpeningCompleted);
+            intelManager.Handler.RegisterHandler(Case.WorkerAddedSelf, CheckOpeningCompleted);
 
             // Init Production!
             productionManager.QueueUnit(Unit.SCV); // 13
@@ -59,11 +61,6 @@ namespace SC2Abathur.Modules.Tactics
             productionManager.QueueUnit(Unit.Barracks, spacing: 2);
             productionManager.QueueUnit(Unit.SCV); // 17 (just at bonus)
             productionManager.QueueUnit(Unit.SupplyDepot, spacing: 2);
-
-            // Marine time
-            for (int i = 0; i < 5; i++) {
-                productionManager.QueueUnit(Unit.Marine);
-            }
         }
 
         public void OnStep() 
@@ -89,11 +86,10 @@ namespace SC2Abathur.Modules.Tactics
         public void CheckOpeningCompleted(IUnit unit)
         {
             // TODO: Potentially rush-vulnerable hardcoded check
-            bool SCVs = intelManager.UnitsSelf(Unit.SCV).Count() >= 16;
-            bool barracks = intelManager.UnitsSelf(Unit.Barracks).Count() >= 2;
-            bool supplyDepots = intelManager.UnitsSelf(Unit.SupplyDepot).Count() >= 2;
-            bool marines = intelManager.UnitsSelf(Unit.Marine).Count() >= 5;
-            Completed = SCVs && barracks && supplyDepots && marines;
+            bool SCVs = intelManager.WorkersSelf().Count() >= 16;
+            bool barracks = intelManager.StructuresSelf(Unit.Barracks).Count() >= 2;
+            bool supplyDepots = intelManager.StructuresSelf(Unit.SupplyDepot).Count() >= 2;
+            Completed = SCVs && barracks && supplyDepots;
         }
     }
 }

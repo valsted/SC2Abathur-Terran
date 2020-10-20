@@ -62,6 +62,7 @@ namespace SC2Abathur.Modules {
             attackModule.enemyPositions = enemyStartLocations;
 
             AddTactic(openerModule);
+            strategy = Strategy.Opener;
         }
 
 
@@ -69,7 +70,6 @@ namespace SC2Abathur.Modules {
         // This method is called asynchronous if the framework IsParallelized is true in the setup file.
         public void OnStep() 
         {
-            // TODO: switch to 
             switch (strategy)
             {
                 case Strategy.Opener:

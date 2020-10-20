@@ -26,7 +26,7 @@ namespace SC2Abathur.Modules
         private Dictionary<string, Squad> squads;
         private Squad productionSquad;
         private int squadIdx;
-        private int squadSize = 6;
+        private int squadSize = 5;
 
         public IEnumerable<IColony> enemyPositions;
 
@@ -56,7 +56,7 @@ namespace SC2Abathur.Modules
         {
             if (!intelManager.ProductionQueue.Any())
             {
-                BuildSquad();
+                QueueSquad();
             }
 
             // Lets attack stuff!
@@ -89,9 +89,11 @@ namespace SC2Abathur.Modules
             }
 
             // 3: Enemy starting position
+            bool first = true;
             foreach (var enemyPos in enemyPositions)
             {
-                combatManager.AttackMove(squad, enemyPos.Point, queue: true);
+                combatManager.AttackMove(squad, enemyPos.Point, queue: !first);
+                first = false;
             }
         }
 
@@ -133,7 +135,7 @@ namespace SC2Abathur.Modules
             }
         }
 
-        private void BuildSquad()
+        private void QueueSquad()
         {
             for (int i = 0; i < squadSize; i++)
             {
@@ -175,11 +177,5 @@ namespace SC2Abathur.Modules
             // TODO : make something better
             return squad.Units.First().Point;
         }
-
-        //private int GetBarrackCount()
-        //{
-        //    return intelManager.StructuresSelf().Where(s => s.UnitType == Unit.Barracks).Count();
-        //}
-
     }
 }
