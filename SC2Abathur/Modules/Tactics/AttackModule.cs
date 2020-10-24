@@ -5,11 +5,9 @@ using Abathur.Model;
 using Abathur.Modules;
 using Abathur.Repositories;
 using NydusNetwork.API.Protocol;
-using System;
+using SC2Abathur.Utilities;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using static Abathur.Constants.BlizzardConstants;
 
 namespace SC2Abathur.Modules
 {
@@ -74,7 +72,7 @@ namespace SC2Abathur.Modules
             var units = intelManager.UnitsEnemyVisible.ToList();
             if (units.Any())
             {
-                var target = GetClosest(squadPos, units.Select(u => u.Point).ToList());
+                var target = Geometry.GetClosest(squadPos, units.Select(u => u.Point).ToList());
                 combatManager.AttackMove(squad, target);
                 return;
             }
@@ -83,7 +81,7 @@ namespace SC2Abathur.Modules
             var structures = intelManager.StructuresEnemyVisible.ToList();
             if (structures.Any())
             {
-                var target = GetClosest(squadPos, structures.Select(u => u.Point).ToList());
+                var target = Geometry.GetClosest(squadPos, structures.Select(u => u.Point).ToList());
                 combatManager.AttackMove(squad, target);
                 return;
             }
@@ -148,28 +146,6 @@ namespace SC2Abathur.Modules
             squads.Add(productionSquad.Name, productionSquad);
             squadIdx++;
             productionSquad = squadRepo.Create(squadIdx.ToString());
-        }
-
-
-        private Point2D GetClosest(Point2D source, List<Point2D> points)
-        {
-            var closest = points[0];
-            var minDist = Distance(source, closest);
-            foreach (var point in points)
-            {
-                var dist = Distance(source, point);
-                if (dist < minDist)
-                {
-                    closest = point;
-                    minDist = dist;
-                }
-            }
-            return closest;
-        }
-
-        private double Distance(Point2D p1, Point2D p2)
-        {
-            return Math.Sqrt((p1.X - p2.X) * (p1.X - p2.X) + (p1.Y - p2.Y) * (p1.Y - p2.Y));
         }
 
         private Point2D GetSquadCenter(Squad squad)
