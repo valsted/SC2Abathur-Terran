@@ -66,7 +66,7 @@ namespace SC2Abathur.Modules
             }
         }
 
-        public void AttackClosest(Squad squad)
+        private void AttackClosest(Squad squad)
         {
             var squadPos = GetSquadCenter(squad);
 

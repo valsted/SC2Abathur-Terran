@@ -31,11 +31,12 @@ namespace SC2Abathur.Modules {
         private List<IReplaceableModule> activeTactics;
         private OpenerModule openerModule;
         private AttackModule attackModule;
+        private EconomyModule economyModule;
         // TODO: Add
 
         public AVStrategy(IAbathur abathur, IIntelManager intelManager, ICombatManager combatManager, 
             IProductionManager productionManager, ISquadRepository squadRep,
-            OpenerModule openerModule, AttackModule attackModule)
+            OpenerModule openerModule, AttackModule attackModule, EconomyModule economyModule)
         {
             this.abathur = abathur;
             this.intelManager = intelManager;
@@ -46,6 +47,7 @@ namespace SC2Abathur.Modules {
             // Tactics
             this.openerModule = openerModule;
             this.attackModule = attackModule;
+            this.economyModule = economyModule;
         }
 
         #region Framework hooks
@@ -61,8 +63,10 @@ namespace SC2Abathur.Modules {
             FindStartingLocations();
             attackModule.enemyPositions = enemyStartLocations;
 
-            AddTactic(openerModule);
+            // AddTactic(openerModule);
             strategy = Strategy.Opener;
+
+            AddTactic(economyModule);
         }
 
 
@@ -70,20 +74,20 @@ namespace SC2Abathur.Modules {
         // This method is called asynchronous if the framework IsParallelized is true in the setup file.
         public void OnStep() 
         {
-            switch (strategy)
-            {
-                case Strategy.Opener:
-                    if (openerModule.Completed)
-                    {
-                        RemoveTactic(openerModule);
-                        AddTactic(attackModule);
-                        strategy = Strategy.Aggression;
-                    }
-                    break;
-                case Strategy.Aggression:
-                    // We just stay here...
-                    break;
-            }
+            //switch (strategy)
+            //{
+            //    case Strategy.Opener:
+            //        if (openerModule.Completed)
+            //        {
+            //            RemoveTactic(openerModule);
+            //            AddTactic(attackModule);
+            //            strategy = Strategy.Aggression;
+            //        }
+            //        break;
+            //    case Strategy.Aggression:
+            //        // We just stay here...
+            //        break;
+            //}
         }
 
         // Called when game has ended but before leaving the match.

@@ -65,7 +65,7 @@ namespace SC2Abathur.Modules.Tactics
 
         public void OnStep() 
         {
-           // Let productionManager do it's thing
+            // Let productionManager do it's thing
         }
 
         public void OnGameEnded()
