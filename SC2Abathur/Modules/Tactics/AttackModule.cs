@@ -24,9 +24,11 @@ namespace SC2Abathur.Modules
         private Dictionary<string, Squad> squads;
         private Squad productionSquad;
         private int squadIdx;
-        private int squadSize = 5;
+        private int squadSize = 8;
 
         public IEnumerable<IColony> enemyPositions;
+
+        private bool expanding;
 
         public AttackModule(IIntelManager intelManager, IProductionManager productionManager,
             ICombatManager combatManager, ISquadRepository squadRepo)
@@ -46,15 +48,22 @@ namespace SC2Abathur.Modules
             productionSquad = squadRepo.Create(squadIdx.ToString());
 
             // Register handlers
+            intelManager.Handler.RegisterHandler(Case.StructureAddedSelf, OnStructureBuilt);
             intelManager.Handler.RegisterHandler(Case.UnitAddedSelf, OnUnitBuilt);
             intelManager.Handler.RegisterHandler(Case.UnitDestroyed, OnUnitDestroyed);
         }
 
         public void OnStep()
         {
-            if (!intelManager.ProductionQueue.Any())
+            if (!intelManager.ProductionQueue.Any(u => IsInfantryUnit(u.UnitId)))
             {
                 QueueSquad();
+            }
+            
+            // If surplus of resources, increase production capacity
+            if (!expanding && intelManager.Common.Minerals > 500)
+            {
+                ExpandInfantryProduction();
             }
 
             // Lets attack stuff!
@@ -62,6 +71,17 @@ namespace SC2Abathur.Modules
             {
                 AttackClosest(squad);
             }
+        }
+
+        private void ExpandInfantryProduction()
+        {
+            if (intelManager.ProductionQueue.Any(u => IsInfantryBuilding(u.UnitId)))
+                return; // Already producing...
+
+            productionManager.QueueUnit(BlizzardConstants.Unit.Barracks, lowPriority: false, spacing: 3);
+            productionManager.QueueUnit(BlizzardConstants.Unit.BarracksTechLab);
+            productionManager.QueueUnit(BlizzardConstants.Unit.Barracks, lowPriority: false, spacing: 3);
+            productionManager.QueueUnit(BlizzardConstants.Unit.BarracksReactor);
         }
 
         private void AttackClosest(Squad squad)
@@ -102,10 +122,27 @@ namespace SC2Abathur.Modules
             // Deregister handlers
             intelManager.Handler.DeregisterHandler(OnUnitBuilt);
             intelManager.Handler.DeregisterHandler(OnUnitDestroyed);
+            intelManager.Handler.DeregisterHandler(OnStructureBuilt);
         }
 
         public void OnAdded() => OnStart();
         public void OnRemoved() => OnRestart();
+
+        public void OnStructureBuilt(IUnit structure)
+        {
+            expanding = intelManager.ProductionQueue.Any(u => IsInfantryBuilding(u.UnitId));
+            if (structure.UnitType == BlizzardConstants.Unit.BarracksTechLab)
+            {
+                if (!intelManager.UpgradesSelf.Any(u => u.UpgradeId == BlizzardConstants.Research.CombatShield))
+                    productionManager.QueueTech(BlizzardConstants.Research.CombatShield);
+
+                if (!intelManager.UpgradesSelf.Any(u => u.UpgradeId == BlizzardConstants.Research.Stimpack))
+                    productionManager.QueueTech(BlizzardConstants.Research.Stimpack);
+
+                if (!intelManager.UpgradesSelf.Any(u => u.UpgradeId == BlizzardConstants.Research.ConcussiveShells))
+                    productionManager.QueueTech(BlizzardConstants.Research.ConcussiveShells);
+            }
+        }
 
         public void OnUnitDestroyed(IUnit unit)
         {
@@ -123,7 +160,7 @@ namespace SC2Abathur.Modules
 
         public void OnUnitBuilt(IUnit unit)
         {
-            if (unit.UnitType == BlizzardConstants.Unit.Marine)
+            if (IsInfantryUnit(unit.UnitType))
             {
                 productionSquad.AddUnit(unit);
                 if (productionSquad.Units.Count >= squadSize)
@@ -135,9 +172,19 @@ namespace SC2Abathur.Modules
 
         private void QueueSquad()
         {
+            if (!intelManager.StructuresSelf(BlizzardConstants.Unit.Barracks).Any()
+             && !intelManager.ProductionQueue.Any(u => IsInfantryBuilding(u.UnitId)))
+            {
+                ExpandInfantryProduction();
+                return;
+            }
+
             for (int i = 0; i < squadSize; i++)
             {
-                productionManager.QueueUnit(BlizzardConstants.Unit.Marine);
+                if (i % 4 == 0)
+                    productionManager.QueueUnit(BlizzardConstants.Unit.Marauder);
+                else
+                    productionManager.QueueUnit(BlizzardConstants.Unit.Marine);
             }
         }
 
@@ -153,5 +200,14 @@ namespace SC2Abathur.Modules
             // TODO : make something better
             return squad.Units.First().Point;
         }
+
+        private bool IsInfantryBuilding(uint unitTypeId)
+            => unitTypeId == BlizzardConstants.Unit.Barracks
+            || unitTypeId == BlizzardConstants.Unit.BarracksTechLab
+            || unitTypeId == BlizzardConstants.Unit.BarracksReactor;
+
+        private bool IsInfantryUnit(uint unitTypeId)
+            => unitTypeId == BlizzardConstants.Unit.Marauder
+            || unitTypeId == BlizzardConstants.Unit.Marine;
     }
 }

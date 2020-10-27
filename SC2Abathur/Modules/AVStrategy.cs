@@ -67,6 +67,7 @@ namespace SC2Abathur.Modules {
             strategy = Strategy.Opener;
 
             AddTactic(economyModule);
+            economyModule.mode = EconomyMode.FillExisting;
         }
 
 
@@ -74,6 +75,18 @@ namespace SC2Abathur.Modules {
         // This method is called asynchronous if the framework IsParallelized is true in the setup file.
         public void OnStep() 
         {
+            if (strategy == Strategy.Opener && intelManager.GameLoop > 1000)
+            {
+                AddTactic(attackModule);
+                strategy = Strategy.Aggression;
+            }
+
+            // TODO: detect when not under significant attack and defense on standby
+            if (intelManager.GameLoop > 50000)
+            {
+                economyModule.mode = EconomyMode.Expand;
+            }
+            
             //switch (strategy)
             //{
             //    case Strategy.Opener:

@@ -43,8 +43,10 @@ namespace SC2Abathur.Utilities
             return closest;
         }
 
+        // Euclidean distance
         public static double Distance(IPosition pos1, IPosition pos2) => Distance(pos1.Point, pos2.Point);
 
+        // Euclidean distance
         public static double Distance(Point2D p1, Point2D p2)
             => Math.Sqrt((p1.X - p2.X) * (p1.X - p2.X) + (p1.Y - p2.Y) * (p1.Y - p2.Y));
     }
