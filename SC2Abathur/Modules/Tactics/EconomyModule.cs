@@ -1,16 +1,11 @@
 ﻿using Abathur.Constants;
 using Abathur.Core;
+using Abathur.Extensions;
 using Abathur.Model;
 using Abathur.Modules;
-using Abathur.Modules.Services;
-using Microsoft.VisualBasic;
-using SC2Abathur.Utilities;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace SC2Abathur.Modules.Tactics
 {
@@ -38,8 +33,10 @@ namespace SC2Abathur.Modules.Tactics
 
         public void OnStart() 
         {
+            mode = EconomyMode.FillExisting;
+
             // Start focus on minerals
-            GetOwnColonies().ForEach(c => c.DesiredVespeneWorkers = 0);
+            Helpers.GetOwnColonies(intelManager).ForEach(c => c.DesiredVespeneWorkers = 0);
 
             // Built handlers
             intelManager.Handler.RegisterHandler(Case.StructureAddedSelf, OnStructureBuilt);
@@ -49,8 +46,6 @@ namespace SC2Abathur.Modules.Tactics
             intelManager.Handler.RegisterHandler(Case.StructureDestroyed, OnStructureLost);
             
             // intelManager.Handler.RegisterHandler(Case.VespeneDepleted, OnVespeneDepleted);
-
-            mode = EconomyMode.Expand;
         }
 
         public void OnStep()
@@ -64,47 +59,44 @@ namespace SC2Abathur.Modules.Tactics
                     // TODO: call down MULEs
                     return;
                 case EconomyMode.FillExisting:
-                    GetOwnColonies().ForEach(FillColonyEconomy);
+                    Helpers.GetOwnColonies(intelManager).ForEach(FillColonyEconomy);
                     break;
                 case EconomyMode.Expand:
-                    var ownColonies = GetOwnColonies();
+                    var ownColonies = Helpers.GetOwnColonies(intelManager);
                     ownColonies.ForEach(FillColonyEconomy);
-                    if (ownColonies.All(c => GetEconomyState(c) == EconomyState.Thriving)
+                    if (ownColonies.All(c => GetEconomyState(c) == EconomyState.Saturated)
                         && !intelManager.ProductionQueue.Any(u => u.UnitId == BlizzardConstants.Unit.CommandCenter))
                     {
                         var expansionSpot = FindExpansionSpace();
-                        productionManager.QueueUnit(BlizzardConstants.Unit.CommandCenter, desiredPosition: expansionSpot.Point);  // Spacing 3 for mineral patch distance
+                        productionManager.QueueUnit(BlizzardConstants.Unit.CommandCenter, desiredPosition: expansionSpot.Point);
                     }
                     break;
             }
 
             BalanceWorkers();
-
-            // TODO: check for idle workers (even after auto-harvest-gather)
-            // and auto-cast repair, and place near colonies
         }
 
         public void OnStructureBuilt(IUnit structure)
         {
             if (structure.UnitType == BlizzardConstants.Unit.Refinery)
                 OnRefineryBuilt(structure);
-            else if (IsTerranResourceCenter(structure))
+            else if (Helpers.IsTerranResourceCenter(structure))
                 OnCommandCenterBuilt(structure);
         }
 
         private void OnCommandCenterBuilt(IUnit commandCenter)
         {
             // Find new center, and divert workers from existing (to balance auto-harvest gather)
-            var ownColonies = GetOwnColonies();
-            var newColony = (IColony)Geometry.GetClosest(commandCenter, ownColonies);
+            var ownColonies = Helpers.GetOwnColonies(intelManager);
+            var newColony = commandCenter.GetClosest(ownColonies);
             newColony.DesiredVespeneWorkers = 0;
         }
 
         private void OnRefineryBuilt(IUnit refinery)
         {
             // Find refinery's colony and increase desired workers
-            var colony = Geometry.GetClosest(refinery, GetOwnColonies());
-            ((IColony) colony).DesiredVespeneWorkers += 1;
+            var colony = refinery.GetClosest(Helpers.GetOwnColonies(intelManager));
+            colony.DesiredVespeneWorkers += 1;
         }
 
 
@@ -139,7 +131,7 @@ namespace SC2Abathur.Modules.Tactics
 
         private void BalanceWorkers()
         {
-            var ownColonies = GetOwnColonies();
+            var ownColonies = Helpers.GetOwnColonies(intelManager);
             var surplusColonies = ownColonies.Where(c => GetEconomyState(c) == EconomyState.Surplus);
             var missingColonies = new Stack<IColony>();
             ownColonies.Where(c => GetEconomyState(c) == EconomyState.Missing).ToList()
@@ -171,12 +163,10 @@ namespace SC2Abathur.Modules.Tactics
             // Check minerals
             var optimalMineralWorkers = OptimalMineralWorkers(colony);
             var curMineralWorkers = currentWorkers - colony.DesiredVespeneWorkers;
-            if (curMineralWorkers < optimalMineralWorkers) 
+            var excessMinerals = intelManager.Common.Minerals > 1000;
+            if (!excessMinerals && curMineralWorkers + workersInQueue < optimalMineralWorkers - 1) 
             {
-                if (workersInQueue < (optimalMineralWorkers - curMineralWorkers))
-                {
-                    productionManager.QueueUnit(BlizzardConstants.Unit.SCV);
-                }
+                productionManager.QueueUnit(BlizzardConstants.Unit.SCV, lowPriority: true);
             }
             else
             {
@@ -190,7 +180,7 @@ namespace SC2Abathur.Modules.Tactics
                     && !intelManager.ProductionQueue.Any(u => u.UnitId == BlizzardConstants.Unit.Refinery))
                 {
                     productionManager.QueueUnit(BlizzardConstants.Unit.Refinery,
-                        desiredPosition: colony.Point, lowPriority: false);
+                        desiredPosition: colony.Point, lowPriority: true);
                 }
             }
         }
@@ -210,19 +200,6 @@ namespace SC2Abathur.Modules.Tactics
                 return EconomyState.Surplus;
         }
 
-        private List<IColony> GetOwnColonies()
-        {
-            var ownColonies = new List<IColony>();
-            var commandCenters = intelManager.StructuresSelf().Where(IsTerranResourceCenter).ToList();
-            foreach (var colony in intelManager.Colonies)
-            {
-                if (commandCenters.Any(cc => colony.Structures.Contains(cc))) {
-                    ownColonies.Add(colony);
-                }
-            }
-            return ownColonies;
-        }
-
         private int VespeneWorkerCapacity(IColony colony)
             => colony.Structures.Where(s => s.UnitType == BlizzardConstants.Unit.Refinery).Count() * 3;
 
@@ -232,8 +209,8 @@ namespace SC2Abathur.Modules.Tactics
         private IColony FindExpansionSpace()
         {
             var candidates = intelManager.Colonies.Where(c => !c.IsStartingLocation).Where(c => c.Structures.Count() == 0);
-            var closest = Geometry.GetClosest(intelManager.PrimaryColony, candidates);
-            return (IColony) closest;
+            var closest = intelManager.PrimaryColony.GetClosest(candidates);
+            return closest;
         }
 
         private IUnit GetRandomMineralPatch(IColony colony)
@@ -241,11 +218,6 @@ namespace SC2Abathur.Modules.Tactics
             var patches = colony.Minerals.ToList();
             return patches[rng.Next(patches.Count)];
         }
-
-        private bool IsTerranResourceCenter(IUnit unit)
-            => unit.UnitType == BlizzardConstants.Unit.CommandCenter
-               || unit.UnitType == BlizzardConstants.Unit.OrbitalCommand
-               || unit.UnitType == BlizzardConstants.Unit.PlanetaryFortress;
     }
 
     public enum EconomyMode

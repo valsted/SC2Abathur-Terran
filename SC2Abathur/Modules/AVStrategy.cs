@@ -1,4 +1,5 @@
 ﻿using Abathur;
+using Abathur.Constants;
 using Abathur.Core;
 using Abathur.Model;
 using Abathur.Modules;
@@ -15,28 +16,27 @@ namespace SC2Abathur.Modules {
 
     public class AVStrategy : IModule 
     {
-        //private List
-        private Strategy strategy;
-        private IEnumerable<IColony> enemyStartLocations;
+        IEnumerable<IColony> enemyStartLocations;
 
         // Framework repos
-        // Need access to replace modules.
-        private IAbathur abathur;
-        private readonly IIntelManager intelManager;
-        private readonly ICombatManager combatManager;
-        private readonly IProductionManager productionManager;
-        private readonly ISquadRepository squadRepo;
+        IAbathur abathur;
+        readonly IIntelManager intelManager;
+        readonly ICombatManager combatManager;
+        readonly IProductionManager productionManager;
+        readonly ISquadRepository squadRepo;
 
         // Tactical modules
-        private List<IReplaceableModule> activeTactics;
-        private OpenerModule openerModule;
-        private AttackModule attackModule;
-        private EconomyModule economyModule;
+        List<IReplaceableModule> activeTactics;
+        GroundModule attackModule;
+        EconomyModule economyModule;
+        AirModule airModule;
         // TODO: Add
+
+        bool isBoostingSupply;
 
         public AVStrategy(IAbathur abathur, IIntelManager intelManager, ICombatManager combatManager, 
             IProductionManager productionManager, ISquadRepository squadRep,
-            OpenerModule openerModule, AttackModule attackModule, EconomyModule economyModule)
+            GroundModule attackModule, EconomyModule economyModule, AirModule airModule)
         {
             this.abathur = abathur;
             this.intelManager = intelManager;
@@ -45,73 +45,69 @@ namespace SC2Abathur.Modules {
             this.squadRepo = squadRep;
 
             // Tactics
-            this.openerModule = openerModule;
             this.attackModule = attackModule;
             this.economyModule = economyModule;
+            this.airModule = airModule;
         }
 
         #region Framework hooks
 
         // Called after connection is established to the StarCraft II Client, but before a game is entered.
-        public void Initialize() {
-            activeTactics = new List<IReplaceableModule>();
-        }
+        public void Initialize() { }
 
         // Called on the first frame in each game.
         public void OnStart()
         {
+            activeTactics = new List<IReplaceableModule>();
+
             FindStartingLocations();
             attackModule.enemyPositions = enemyStartLocations;
-
-            // AddTactic(openerModule);
-            strategy = Strategy.Opener;
+            airModule.enemyPositions = enemyStartLocations;
 
             AddTactic(economyModule);
             economyModule.mode = EconomyMode.FillExisting;
-        }
 
+            intelManager.Handler.RegisterHandler(Case.StructureAddedSelf, OnStructureBuilt);
+        }
 
         // Called in every frame - except the first (use OnStart).
         // This method is called asynchronous if the framework IsParallelized is true in the setup file.
         public void OnStep() 
         {
-            if (strategy == Strategy.Opener && intelManager.GameLoop > 1000)
+            if (intelManager.GameLoop % 100 == 0)
+            {
+                Helpers.PrintProductionQueue(intelManager);
+                activeTactics.ForEach(t => Console.WriteLine(t.GetType()));
+            }
+
+
+            if (intelManager.GameLoop == 600) // After 1 minute?
             {
                 AddTactic(attackModule);
-                strategy = Strategy.Aggression;
-            }
-
-            // TODO: detect when not under significant attack and defense on standby
-            if (intelManager.GameLoop > 50000)
-            {
                 economyModule.mode = EconomyMode.Expand;
             }
-            
-            //switch (strategy)
-            //{
-            //    case Strategy.Opener:
-            //        if (openerModule.Completed)
-            //        {
-            //            RemoveTactic(openerModule);
-            //            AddTactic(attackModule);
-            //            strategy = Strategy.Aggression;
-            //        }
-            //        break;
-            //    case Strategy.Aggression:
-            //        // We just stay here...
-            //        break;
-            //}
+
+            if (intelManager.GameLoop == 4000)
+            {
+                RemoveTactic(attackModule);
+                RemoveTactic(economyModule);
+                AddTactic(airModule);
+            }
+
+            if (!isBoostingSupply && intelManager.ProductionQueue.Count() > 10 
+                && intelManager.Common.FoodCap - intelManager.Common.FoodUsed < 5)
+            {
+                // We need to prioritize supply first
+                isBoostingSupply = true;
+                productionManager.ClearBuildOrder();
+                productionManager.QueueUnit(BlizzardConstants.Unit.SupplyDepot);
+                return;
+            }
         }
 
-        // Called when game has ended but before leaving the match.
-        public void OnGameEnded() {}
+        public void OnGameEnded() { }
 
-        // Called before starting when starting a new game (but not the first) - can be called mid-game if a module request a restart
-        public void OnRestart() 
-        {
-            // _abathur.RemoveFromGameloop(_terranModule);
-            strategy = Strategy.Opener;
-        }
+        public void OnRestart() { }
 
         #endregion
 
@@ -132,11 +128,18 @@ namespace SC2Abathur.Modules {
             activeTactics.Remove(tactic);
             abathur.RemoveFromGameloop(tactic);
         }
-    }
 
-    public enum Strategy
-    {
-        Opener,
-        Aggression
+        public void OnStructureBuilt(IUnit structure)
+        {
+            switch(structure.UnitType)
+            {
+                case BlizzardConstants.Unit.SupplyDepot:
+                    if (!intelManager.ProductionQueue.Any(u => u.UnitId == BlizzardConstants.Unit.SupplyDepot))
+                        isBoostingSupply = false;
+                    break;
+                default:
+                    break;
+            }
+        }
     }
 }
