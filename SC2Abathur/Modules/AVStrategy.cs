@@ -78,6 +78,9 @@ namespace SC2Abathur.Modules {
             productionManager.QueueUnit(BlizzardConstants.Unit.SCV, lowPriority: false);
             productionManager.QueueUnit(BlizzardConstants.Unit.BarracksReactor, lowPriority: false);
             productionManager.QueueTech(BlizzardConstants.Research.CombatShield, lowPriority: false);
+            productionManager.QueueUnit(BlizzardConstants.Unit.SCV, lowPriority: true);
+            productionManager.QueueUnit(BlizzardConstants.Unit.SCV, lowPriority: true);
+            productionManager.QueueUnit(BlizzardConstants.Unit.SCV, lowPriority: true);
         }
 
         public void OnStep() 
@@ -98,12 +101,12 @@ namespace SC2Abathur.Modules {
             // 1. Assess threats? (10%)
             var ownUnitCount = intelManager.UnitsSelf().Count();
             var enemyUnitCount = intelManager.UnitsEnemy().Count();
-            if (snapshot.BaseThreats.Sum(kv => kv.Value.Count) > (0.2 * ownUnitCount))
+            if (snapshot.BaseThreats.Sum(kv => kv.Value.Count) > (0.1 * ownUnitCount))
 			{
                 snapshot.Attacking = false;
                 snapshot.EconomyMode = EconomyMode.Standby;
             }
-            else if (ownUnitCount > enemyUnitCount)
+            else if (ownUnitCount > enemyUnitCount * 1.2)
 			{
                 snapshot.Attacking = true;
                 snapshot.EconomyMode = EconomyMode.Expand;
@@ -116,7 +119,7 @@ namespace SC2Abathur.Modules {
 
             // 2. Coordinate modules
             if (intelManager.StructuresSelf(BlizzardConstants.Unit.Barracks).Any()
-                    && !TacticActive(typeof(InfantryModule)))
+                    && !IsTacticActive(typeof(InfantryModule)))
             {
                 AddTactic(new InfantryModule(snapshot, intelManager, productionManager, combatManager, squadRepo));
             }
@@ -129,21 +132,29 @@ namespace SC2Abathur.Modules {
                     infantryUpgraded = true;
                 }
 
-                if (intelManager.GameLoop > 600 // 1 m 30 sec?
-                    && !TacticActive(typeof(MechModule)))  
+                if (intelManager.GameLoop > 900 // 1 m 30 sec?
+                    && !IsTacticActive(typeof(MechModule)))  
 				{
                     AddTactic(new MechModule(snapshot, intelManager, productionManager, combatManager, squadRepo));
                 }
 
-                if (intelManager.GameLoop > 1800 // 3 m?
-                    && !TacticActive(typeof(AirModule)))
+                if (intelManager.GameLoop > 3000 // 5 m?
+                    && !IsTacticActive(typeof(AirModule)))
                 {
                     AddTactic(new AirModule(snapshot, intelManager, productionManager, combatManager, squadRepo));
                 }
             }
+
+            // 3. Try to be ahead on supply
+            if (snapshot.RemainingSupply < 10 && !IsBuildingSupplyDepot())
+			{
+                productionManager.QueueUnit(BlizzardConstants.Unit.SupplyDepot, lowPriority: true,
+                    desiredPosition: snapshot.LeastExpandedColony.Point);
+			}
+
         }
 
-        private bool CheckStartupDone()
+		private bool CheckStartupDone()
         {
             if (!startupSequenceDone)
             {
@@ -192,7 +203,11 @@ namespace SC2Abathur.Modules {
                 productionManager.QueueTech(BlizzardConstants.Research.ConcussiveShells, lowPriority: true);
         }
 
-        private bool TacticActive(Type tacticType) => activeTactics.Any(t => t.GetType() == tacticType);
+        private bool IsTacticActive(Type tacticType) => activeTactics.Any(t => t.GetType() == tacticType);
+
+        private bool IsBuildingSupplyDepot()
+            => intelManager.ProductionQueue.Any(u => u.UnitId == BlizzardConstants.Unit.SupplyDepot)
+            || intelManager.StructuresSelf(BlizzardConstants.Unit.SupplyDepot).Any(u => u.BuildProgress < 0.99);
     }
 
 }

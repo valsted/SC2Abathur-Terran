@@ -19,8 +19,9 @@ namespace SC2Abathur.Modules.Tactics
 
     public class InfantryModule : IReplaceableModule
     {
-        readonly string SQUAD_PREFIX = "inf";
-        readonly int SQUAD_SIZE = 6;
+        static readonly string SQUAD_PREFIX = "inf";
+        static readonly int SQUAD_SIZE = 6;
+        static readonly int BARRACKS_MINERALS = 150;
 
         readonly IIntelManager intelManager;
         readonly IProductionManager productionManager;
@@ -86,8 +87,8 @@ namespace SC2Abathur.Modules.Tactics
             {
                 productionManager.QueueUnit(BlizzardConstants.Unit.Factory, spacing: 2);
             }
-            else if (BarracksReady() && !intelManager.ProductionQueue.Any(u => IsInfantryBuilding(u.UnitId))
-                && barracks.Count < squads.Count)
+            else if (BarracksReady() && CanAfford() && !intelManager.ProductionQueue.Any(u => IsInfantryBuilding(u.UnitId))
+                && squads.Count > barracks.Count)
 			{
                 QueueProductionFacility();
 			}
@@ -105,7 +106,9 @@ namespace SC2Abathur.Modules.Tactics
             }
         }
 
-        private void Attack(Squad squad)
+		
+
+		private void Attack(Squad squad)
         {
             var squadPos = Helpers.GetAvgLocation(squad.Units);
 
@@ -175,8 +178,7 @@ namespace SC2Abathur.Modules.Tactics
             {
                 case BlizzardConstants.Unit.Barracks:
                 case BlizzardConstants.Unit.BarracksReactor:
-                    var facility = new ProductionFacility(structure);
-                    barracks.Add(facility);
+                    barracks.Add(new ProductionFacility(structure));
                     break;
                 default:
                     break; // None of our business
@@ -189,8 +191,8 @@ namespace SC2Abathur.Modules.Tactics
             {
                 case BlizzardConstants.Unit.Barracks:
                 case BlizzardConstants.Unit.BarracksReactor:
-                    var facility = new ProductionFacility(structure);
-                    barracks.Remove(facility);
+                    var lost = barracks.Where(b => b.Structure.Tag == structure.Tag).FirstOrDefault();
+                    barracks.Remove(lost);
                     break;
                 default:
                     break; // None of our business
@@ -240,7 +242,7 @@ namespace SC2Abathur.Modules.Tactics
             if (makeMarauders && unitCounter % 4 == 0)
                 productionManager.QueueUnit(BlizzardConstants.Unit.Marauder);
             else
-                productionManager.QueueUnit(BlizzardConstants.Unit.Marine);
+                productionManager.QueueUnit(BlizzardConstants.Unit.Marine, lowPriority: false);
 
             unitCounter++;
         }
@@ -251,11 +253,12 @@ namespace SC2Abathur.Modules.Tactics
             var reactorCount = barracks.Where(b => b.Ready && b.Structure.UnitType == BlizzardConstants.Unit.BarracksReactor).Count();
             if (reactorCount < barrackCount)
             {
-                productionManager.QueueUnit(BlizzardConstants.Unit.BarracksReactor);
+                productionManager.QueueUnit(BlizzardConstants.Unit.BarracksReactor, lowPriority: true);
             }
             else
             {
-                productionManager.QueueUnit(BlizzardConstants.Unit.Barracks, spacing: 2);
+                productionManager.QueueUnit(BlizzardConstants.Unit.Barracks, spacing: 2, lowPriority: true,
+                    desiredPosition: snapshot.LeastExpandedColony.Point);
             }
         }
 
@@ -268,6 +271,8 @@ namespace SC2Abathur.Modules.Tactics
 		}
 
         private bool BarracksReady() => barracks.All(b => b.Ready);
+
+        private bool CanAfford() => intelManager.Common.Minerals > BARRACKS_MINERALS * 3;
 
         private bool IsInfantryBuilding(uint unitTypeId)
             => unitTypeId == BlizzardConstants.Unit.Barracks

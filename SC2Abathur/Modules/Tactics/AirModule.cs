@@ -14,9 +14,12 @@ namespace SC2Abathur.Modules.Tactics
 {
     public class AirModule : IReplaceableModule
     {
-        static readonly string SQUAD_NAME = "Fleet";
         static readonly int LIBERATOR_MINERALS = 150;
         static readonly int LIBERATOR_VESPENE = 150;
+        static readonly int STARPORT_MINERALS = 150;
+        static readonly int STARPORT_VESPENE = 100;
+
+        readonly string SQUAD_NAME = "Fleet";
 
         readonly IIntelManager intelManager;
         readonly IProductionManager productionManager;
@@ -27,11 +30,9 @@ namespace SC2Abathur.Modules.Tactics
 
         Random rng = new Random();
 
-        bool IsUpgrading;
         bool fleetDeployed = false;
-        FleetState fleetstate;
         Squad fleet;
-        List<IUnit> productionFacilities;
+        List<ProductionFacility> starports;
         HashSet<IUnit> loneUnits;
         
 
@@ -55,19 +56,20 @@ namespace SC2Abathur.Modules.Tactics
 
         public void OnStart()
         {
-            productionFacilities = new List<IUnit>();
+            starports = new List<ProductionFacility>();
             loneUnits = new HashSet<IUnit>();
             fleet = squadRepo.Create(SQUAD_NAME);
-            fleetstate = FleetState.Retaliate;
 
             // Register handlers
             intelManager.Handler.RegisterHandler(Case.StructureAddedSelf, OnStructureBuilt);
+            intelManager.Handler.RegisterHandler(Case.StructureDestroyed, OnStructureDestroyed);
             intelManager.Handler.RegisterHandler(Case.UnitAddedSelf, OnUnitBuilt);
             intelManager.Handler.RegisterHandler(Case.UnitDestroyed, OnUnitDestroyed);
 
-            if (!intelManager.StructuresSelf(BlizzardConstants.Unit.Factory).Any())
+            if (!intelManager.StructuresSelf(BlizzardConstants.Unit.Starport).Any())
             {
-                productionManager.QueueUnit(BlizzardConstants.Unit.Factory, spacing: 2);
+                productionManager.QueueUnit(BlizzardConstants.Unit.Starport, lowPriority: true,
+                    desiredPosition: snapshot.LeastExpandedColony.Point, spacing: 2);
             }
         }
 
@@ -76,34 +78,22 @@ namespace SC2Abathur.Modules.Tactics
             if (intelManager.GameLoop % 3 != 1)
                 return;
 
-            CheckBuiltStatus();
-
             if (ShouldUpgrade())
             {
-                productionManager.QueueUnit(BlizzardConstants.Unit.Starport);
-                IsUpgrading = true;
-                return;
+                productionManager.QueueUnit(BlizzardConstants.Unit.Starport, lowPriority: true,
+                    desiredPosition: snapshot.LeastExpandedColony.Point, spacing: 2);
             }
 
-            switch (fleetstate)
+            if (snapshot.Attacking)
             {
-                case FleetState.Defend:
-                    Defend();
-                    break;
-                case FleetState.Attack:
-                    Attack();
-                    break;
-                case FleetState.Retaliate:
-                    Retaliate();
-                    break;
+                Attack();
+            }
+            else
+            {
+                Defend();
             }
 
             BuildFleet();
-        }
-
-        private void CheckBuiltStatus()
-        {
-            IsUpgrading = productionFacilities.All(u => u.BuildProgress > 99);
         }
 
         private void Attack()
@@ -144,7 +134,8 @@ namespace SC2Abathur.Modules.Tactics
 
         private void Defend()
         {
-            throw new NotImplementedException();
+            // TODO: implement
+            Attack();
         }
 
         private void BuildFleet()
@@ -153,8 +144,8 @@ namespace SC2Abathur.Modules.Tactics
             if (ProductionCapacityAvailable() 
                 && intelManager.Common.Minerals > LIBERATOR_MINERALS && intelManager.Common.Vespene > LIBERATOR_VESPENE)
             {
-                var rallyPoint = fleetstate == FleetState.Attack ? fleet.Units.First().Point : SampleDefensePoint();
-                productionManager.QueueUnit(BlizzardConstants.Unit.Liberator, desiredPosition:rallyPoint, spacing: 1);
+                var rallyPoint = snapshot.Attacking ? fleet.Units.First().Point : SampleDefensePoint();
+                productionManager.QueueUnit(BlizzardConstants.Unit.Liberator, desiredPosition: rallyPoint);
             }
         }
 
@@ -180,13 +171,33 @@ namespace SC2Abathur.Modules.Tactics
             intelManager.Handler.DeregisterHandler(OnUnitBuilt);
             intelManager.Handler.DeregisterHandler(OnUnitDestroyed);
             intelManager.Handler.DeregisterHandler(OnStructureBuilt);
+            intelManager.Handler.DeregisterHandler(OnStructureDestroyed);
         }
 
         public void OnStructureBuilt(IUnit structure)
         {
-            if (structure.UnitType == BlizzardConstants.Unit.Starport)
+            switch (structure.UnitType)
             {
-                productionFacilities.Add(structure);
+                case BlizzardConstants.Unit.Starport:
+                case BlizzardConstants.Unit.StarportReactor:
+                    starports.Add(new ProductionFacility(structure));
+                    break;
+                default:
+                    break; // None of our business
+            }
+        }
+
+        public void OnStructureDestroyed(IUnit structure)
+        {
+            switch (structure.UnitType)
+            {
+                case BlizzardConstants.Unit.Barracks:
+                case BlizzardConstants.Unit.BarracksReactor:
+                    var lost = starports.Where(b => b.Structure.Tag == structure.Tag).FirstOrDefault();
+                    starports.Remove(lost);
+                    break;
+                default:
+                    break; // None of our business
             }
         }
 
@@ -194,10 +205,7 @@ namespace SC2Abathur.Modules.Tactics
         {
             if (unit.UnitType == BlizzardConstants.Unit.Liberator)
             {
-                if (fleetstate == FleetState.Attack)
-                    fleet.AddUnit(unit);
-                else
-                    loneUnits.Add(unit);
+                fleet.AddUnit(unit);
             }
         }
 
@@ -205,48 +213,40 @@ namespace SC2Abathur.Modules.Tactics
         {
             if (unit.UnitType == BlizzardConstants.Unit.Liberator)
             {
-                if (loneUnits.Contains(unit))
-                    loneUnits.Remove(unit);
+                // We don't care yet
 
-                if (fleetstate == FleetState.Attack)
-                {
-                    // Should we retreat?
-                    var fleetPos = Helpers.GetAvgLocation(fleet.Units);
-                    var nearbyAA = intelManager.UnitsEnemyVisible.Where(IsAAUnit)
-                        .Where(u => fleetPos.Distance(u.Point) < 10)  // Max liberator attack range + buffer
-                        .ToList();
+                //if (fleetstate == FleetState.Attack)
+                //{
+                //    // Should we retreat?
+                //    var fleetPos = Helpers.GetAvgLocation(fleet.Units);
+                //    var nearbyAA = intelManager.UnitsEnemyVisible.Where(IsAAUnit)
+                //        .Where(u => fleetPos.Distance(u.Point) < 10)  // Max liberator attack range + buffer
+                //        .ToList();
 
-                    if (fleet.Units.Count < nearbyAA.Count())
-                    {
-                        fleetstate = FleetState.Retaliate;
-                        if (fleetDeployed)
-                        {
-                            combatManager.UseTargetlessAbility(BlizzardConstants.Ability.LiberatorMorphtoAA, fleet);
-                        }
-                        combatManager.Move(fleet, intelManager.PrimaryColony.Point, queue: true); // Back to base
-                    }
-                }
+                //    if (fleet.Units.Count < nearbyAA.Count())
+                //    {
+                //        fleetstate = FleetState.Retaliate;
+                //        if (fleetDeployed)
+                //        {
+                //            combatManager.UseTargetlessAbility(BlizzardConstants.Ability.LiberatorMorphtoAA, fleet);
+                //        }
+                //        combatManager.Move(fleet, intelManager.PrimaryColony.Point, queue: true); // Back to base
+                //    }
+                //}
             }
         }
 
-        private bool ShouldUpgrade()
-        {
-            if (IsUpgrading)
-            {
-                return false;
-            }
-            else if (productionFacilities.Count == 0)
-            {
-                return true;
-            }
-            else
-            {
-                return intelManager.Common.Minerals > 500 && intelManager.Common.Vespene > 200;
-            }
-        }
+        private bool ShouldUpgrade() => 
+            StarportsReady() && CanAfford() && fleet.Units.Count() > starports.Count * 2
+            && !intelManager.ProductionQueue.Any(u => u.UnitId == BlizzardConstants.Unit.Starport);
+
+		private bool StarportsReady() => starports.All(b => b.Ready);
+
+		private bool CanAfford() => 
+            intelManager.Common.Minerals > STARPORT_MINERALS * 3 && intelManager.Common.Vespene > STARPORT_VESPENE * 2;
 
         private bool ProductionCapacityAvailable() =>
-            intelManager.ProductionQueue.Where(u => u.UnitId == BlizzardConstants.Unit.Liberator).Count() < productionFacilities.Count;
+            intelManager.ProductionQueue.Where(u => u.UnitId == BlizzardConstants.Unit.Liberator).Count() < starports.Count;
 
         private bool IsAAUnit(IUnit unit) => AntiAirUnits.Contains(unit.UnitType);
         private static HashSet<uint> AntiAirUnits = new HashSet<uint>
@@ -281,12 +281,5 @@ namespace SC2Abathur.Modules.Tactics
             BlizzardConstants.Unit.Cyclone,
         };
 
-    }
-
-    public enum FleetState
-    {
-        Defend,
-        Attack,
-        Retaliate
     }
 }

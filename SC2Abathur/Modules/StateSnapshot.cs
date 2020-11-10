@@ -27,6 +27,8 @@ namespace SC2Abathur.Modules
 
 		public uint RemainingSupply { get; set; }
 
+		public IColony LeastExpandedColony { get; set; }
+
 		public StateSnapshot()
 		{
 			BaseThreats = new Dictionary<IColony, List<IUnit>>();
@@ -48,6 +50,9 @@ namespace SC2Abathur.Modules
 			}
 
 			RemainingSupply = intelManager.Common.FoodCap - intelManager.Common.FoodUsed;
+
+			var minStructures = OwnColonies.Min(c => c.Structures.Count());
+			LeastExpandedColony = OwnColonies.Where(c => c.Structures.Count() == minStructures).FirstOrDefault();
 		}
 	}
 

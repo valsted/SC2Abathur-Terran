@@ -72,7 +72,8 @@ namespace SC2Abathur.Modules.Tactics
 							&& !intelManager.ProductionQueue.Any(u => u.UnitId == BlizzardConstants.Unit.CommandCenter))
 						{
 							var expansionSpot = FindExpansionSpace();
-							productionManager.QueueUnit(BlizzardConstants.Unit.CommandCenter, desiredPosition: expansionSpot.Point);
+							productionManager.QueueUnit(BlizzardConstants.Unit.CommandCenter, 
+								desiredPosition: expansionSpot.Point, lowPriority: true);
 						}
 						break;
 				}
@@ -115,19 +116,27 @@ namespace SC2Abathur.Modules.Tactics
 			{
 				var lostColony = structure.GetClosest(state.OwnColonies);
 				var newColony = state.OwnColonies.Where(c => c.Id != lostColony.Id).FirstOrDefault();
-				lostColony.Workers.ToList().ForEach(w => TransferWorker(w, lostColony, newColony));
+				if (newColony != null)
+				{
+					lostColony.Workers.ToList().ForEach(w => TransferWorker(w, lostColony, newColony));
+				}
 			}
 		}
 
 		public void OnMineralDepleted(IUnit mineralField)
 		{
-			var colony = mineralField.GetClosest(state.OwnColonies);
+			// Just wait for poll-based balancing.
 
-			// Divert to colony with fewest workers
-			var otherColonies = state.OwnColonies.Where(c => c.Id != colony.Id);
-			var minWorkers = otherColonies.Min(c => c.Workers.Count());
-			var newColony = otherColonies.Where(c => c.Workers.Count() == minWorkers).FirstOrDefault();
-			colony.Workers.ToList().ForEach(w => TransferWorker(w, colony, newColony));
+			//var colony = mineralField.GetClosest(state.OwnColonies);
+
+			//// Divert to colony with fewest workers
+			//var otherColonies = state.OwnColonies.Where(c => c.Id != colony.Id);
+			//var minWorkers = otherColonies.Min(c => c.Workers.Count());
+			//var newColony = otherColonies.Where(c => c.Workers.Count() == minWorkers).FirstOrDefault();
+			//if (newColony != null)
+			//{
+			//	colony.Workers.Take(2).ToList().ForEach(w => TransferWorker(w, colony, newColony));
+			//}
 		}
 
 		public void OnVespeneDepleted(IUnit vespeneGeyser)
@@ -136,7 +145,6 @@ namespace SC2Abathur.Modules.Tactics
 			// throw new NotImplementedException("TODO... handle expired vespene");
 		}
 
-		
 		private void BalanceWorkers()
 		{
 			var surplusColonies = state.OwnColonies.Where(c => GetEconomyState(c) == EconomyState.Surplus);
@@ -158,9 +166,9 @@ namespace SC2Abathur.Modules.Tactics
 		private void TransferWorker(IUnit worker, IColony fromColony, IColony toColony)
 		{
 			fromColony.Workers.Remove(worker);
-			toColony.Workers.Add(worker);
 			worker.Orders.Clear();
 			combatManager.Move(worker.Tag, toColony.Point);
+			toColony.Workers.Add(worker);
 		}
 
 		private void FillColonyWorkers(IColony colony)
@@ -175,7 +183,7 @@ namespace SC2Abathur.Modules.Tactics
 			{
 				productionManager.QueueUnit(BlizzardConstants.Unit.SCV, lowPriority: true, desiredPosition: colony.Point);
 			}
-			else
+			else if (intelManager.GameLoop > 600)  // Wait with more refineries.
 			{
 				// Check vespene
 				var vespeneCapacity = VespeneWorkerCapacity(colony);

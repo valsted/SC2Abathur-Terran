@@ -14,6 +14,9 @@ namespace SC2Abathur.Modules.Tactics
 {
 	public class MechModule : IReplaceableModule
     {
+        static readonly int FACTORY_MINERALS = 150;
+        static readonly int FACTORY_VESPENE = 100;
+
         readonly string SQUAD_PREFIX = "vec";
         readonly int SQUAD_SIZE = 3;
 
@@ -81,8 +84,8 @@ namespace SC2Abathur.Modules.Tactics
 			{
                 productionManager.QueueUnit(BlizzardConstants.Unit.Factory, spacing: 2);
 			}
-            else if (FactoriesReady() && !intelManager.ProductionQueue.Any(u => IsFactory(u.UnitId))
-                && factories.Count < squads.Count)
+            else if (FactoriesReady() && CanAfford() && !intelManager.ProductionQueue.Any(u => IsFactory(u.UnitId))
+                && squads.Count > factories.Count)
             {
                 QueueProductionFacility();
             }
@@ -248,15 +251,16 @@ namespace SC2Abathur.Modules.Tactics
             if (!intelManager.StructuresSelf(BlizzardConstants.Unit.FactoryTechLab).Any()
                 && !intelManager.ProductionQueue.Any(u => u.UnitId == BlizzardConstants.Unit.FactoryTechLab))
 			{
-                productionManager.QueueUnit(BlizzardConstants.Unit.FactoryTechLab);
+                productionManager.QueueUnit(BlizzardConstants.Unit.FactoryTechLab, lowPriority: true);
             }
             else if (reactorCount < factoryCount)
             {
-                productionManager.QueueUnit(BlizzardConstants.Unit.FactoryReactor);
+                productionManager.QueueUnit(BlizzardConstants.Unit.FactoryReactor, lowPriority: true);
             }
             else
             {
-                productionManager.QueueUnit(BlizzardConstants.Unit.Factory, spacing: 2);
+                productionManager.QueueUnit(BlizzardConstants.Unit.Factory, spacing: 2, lowPriority: true,
+                    desiredPosition: snapshot.LeastExpandedColony.Point);
             }
         }
 
@@ -269,6 +273,9 @@ namespace SC2Abathur.Modules.Tactics
         }
 
         private bool FactoriesReady() => factories.All(b => b.Ready);
+
+        private bool CanAfford() =>
+            intelManager.Common.Minerals > FACTORY_MINERALS * 3 && intelManager.Common.Vespene > FACTORY_VESPENE * 1.6;
 
         private bool IsFactory(uint unitTypeId)
             => unitTypeId == BlizzardConstants.Unit.Factory

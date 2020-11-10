@@ -20,7 +20,9 @@ namespace SC2Abathur.Modules
         {
             var ownColonies = new List<IColony>();
             var commandCenters = intelManager.StructuresSelf()
-                .Where(u => GameConstants.IsHeadquarter(u.UnitType)).ToList();
+                .Where(u => GameConstants.IsHeadquarter(u.UnitType))
+                .Where(u => u.BuildProgress > 0.98)
+                .ToList();
             foreach (var colony in intelManager.Colonies)
             {
                 if (commandCenters.Any(cc => colony.Structures.Contains(cc)))
