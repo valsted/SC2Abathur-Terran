@@ -14,8 +14,6 @@ namespace SC2Abathur.Modules.Tactics
 {
     public class AirModule : IReplaceableModule
     {
-        public IEnumerable<IColony> enemyPositions;
-
         static readonly string SQUAD_NAME = "Fleet";
         static readonly int LIBERATOR_MINERALS = 150;
         static readonly int LIBERATOR_VESPENE = 150;
@@ -24,6 +22,8 @@ namespace SC2Abathur.Modules.Tactics
         readonly IProductionManager productionManager;
         readonly ICombatManager combatManager;
         readonly ISquadRepository squadRepo;
+
+        StateSnapshot snapshot;
 
         Random rng = new Random();
 
@@ -35,9 +35,11 @@ namespace SC2Abathur.Modules.Tactics
         HashSet<IUnit> loneUnits;
         
 
-        public AirModule(IIntelManager intelManager, IProductionManager productionManager, 
+        public AirModule(StateSnapshot snapshot, 
+            IIntelManager intelManager, IProductionManager productionManager, 
             ICombatManager combatManager, ISquadRepository squadRepo)
         {
+            this.snapshot = snapshot;
             this.intelManager = intelManager;
             this.productionManager = productionManager;
             this.combatManager = combatManager;
@@ -127,7 +129,7 @@ namespace SC2Abathur.Modules.Tactics
             else if (units.Any(u => u.Orders.Count() == 0))
             {
                 // Have we arrived?
-                if (enemyPositions.Any(p => p.Point.Distance(fleetPos) < 10))
+                if (snapshot.EnemyColonies.Any(p => p.Point.Distance(fleetPos) < 10))
                 {
                     combatManager.UseTargetlessAbility(BlizzardConstants.Ability.LiberatorMorphtoAG, fleet);
                     fleetDeployed = true;
@@ -135,7 +137,7 @@ namespace SC2Abathur.Modules.Tactics
                 // Go to enemy colony
                 else
                 {
-                    combatManager.AttackMove(fleet, enemyPositions.First().Point);
+                    combatManager.AttackMove(fleet, snapshot.EnemyColonies.First().Point);
                 }
             }
         }

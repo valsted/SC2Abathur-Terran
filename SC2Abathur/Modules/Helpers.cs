@@ -1,5 +1,7 @@
 ﻿using Abathur.Constants;
 using Abathur.Core;
+using Abathur.Core.Combat;
+using Abathur.Extensions;
 using Abathur.Model;
 using NydusNetwork.API.Protocol;
 using System;
@@ -14,15 +16,11 @@ namespace SC2Abathur.Modules
     {
         static Dictionary<uint, string> UnitIdToName;
 
-        public static bool IsTerranResourceCenter(IUnit unit)
-            => unit.UnitType == BlizzardConstants.Unit.CommandCenter
-               || unit.UnitType == BlizzardConstants.Unit.OrbitalCommand
-               || unit.UnitType == BlizzardConstants.Unit.PlanetaryFortress;
-
         public static List<IColony> GetOwnColonies(IIntelManager intelManager)
         {
             var ownColonies = new List<IColony>();
-            var commandCenters = intelManager.StructuresSelf().Where(IsTerranResourceCenter).ToList();
+            var commandCenters = intelManager.StructuresSelf()
+                .Where(u => GameConstants.IsHeadquarter(u.UnitType)).ToList();
             foreach (var colony in intelManager.Colonies)
             {
                 if (commandCenters.Any(cc => colony.Structures.Contains(cc)))
@@ -33,7 +31,25 @@ namespace SC2Abathur.Modules
             return ownColonies;
         }
 
-        public static Point2D GetAvgLocation(IEnumerable<IUnit> units)
+		internal static List<IColony> GetEnemyColonies(IIntelManager intelManager)
+		{
+            var enemyColonies = new List<IColony>();
+            var commandCenters = intelManager.StructuresEnemy()
+                .Where(u => GameConstants.IsHeadquarter(u.UnitType)).ToList();
+            foreach (var colony in intelManager.Colonies)
+            {
+                if (commandCenters.Any(cc => colony.Structures.Contains(cc)))
+                {
+                    enemyColonies.Add(colony);
+                }
+            }
+
+            // Add their starting location
+            enemyColonies.Add(intelManager.Colonies.First(c => c.IsStartingLocation));
+            return enemyColonies;
+        }
+
+		public static Point2D GetAvgLocation(IEnumerable<IUnit> units)
         {
             var count = units.Count();
             if (count == 0)
@@ -86,5 +102,30 @@ namespace SC2Abathur.Modules
                 }
             }
         }
+
+        public static bool BuildCompleted(IUnit structure)
+        {
+            return structure != null && structure.BuildProgress > 0.99;
+        }
+
+        public void Regroup(Squad squad, ICombatManager combatManager)
+        {
+            combatManager.AttackMove(squad, Helpers.GetAvgLocation(squad.Units));
+        }
+
+        public static bool BaseUnderAttack(IIntelManager intelManager)
+        {
+            var ownColonies = Helpers.GetOwnColonies(intelManager);
+            var enemyUnits = intelManager.UnitsEnemyVisible.ToList();
+            return ownColonies.Any(col => enemyUnits.Any(u => u.Point.Distance(col.Point) < 15));
+        }
+
+        public static List<IUnit> CompletedStructuresSelf(IIntelManager intelManager, params uint[] types)
+        {
+            var structsSelf = intelManager.StructuresSelf(types).ToList();
+            return intelManager.StructuresSelf(types).Where(BuildCompleted).ToList();
+        }
+
+
     }
 }

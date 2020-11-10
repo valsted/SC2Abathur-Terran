@@ -1,6 +1,7 @@
 ﻿using Abathur;
 using Abathur.Constants;
 using Abathur.Core;
+using Abathur.Extensions;
 using Abathur.Model;
 using Abathur.Modules;
 using Abathur.Repositories;
@@ -16,93 +17,141 @@ namespace SC2Abathur.Modules {
 
     public class AVStrategy : IModule 
     {
-        IEnumerable<IColony> enemyStartLocations;
-
         // Framework repos
         IAbathur abathur;
         readonly IIntelManager intelManager;
         readonly ICombatManager combatManager;
         readonly IProductionManager productionManager;
         readonly ISquadRepository squadRepo;
+        readonly IRawManager rawManager;
+
+        // Global AV modules state
+        StateSnapshot snapshot;
 
         // Tactical modules
         List<IReplaceableModule> activeTactics;
-        GroundModule attackModule;
         EconomyModule economyModule;
-        AirModule airModule;
-        // TODO: Add
 
-        bool isBoostingSupply;
+        bool startupSequenceDone = false;
+        bool infantryUpgraded = false;
 
         public AVStrategy(IAbathur abathur, IIntelManager intelManager, ICombatManager combatManager, 
-            IProductionManager productionManager, ISquadRepository squadRep,
-            GroundModule attackModule, EconomyModule economyModule, AirModule airModule)
+            IProductionManager productionManager, ISquadRepository squadRepo, IRawManager rawManager)
         {
             this.abathur = abathur;
             this.intelManager = intelManager;
             this.combatManager = combatManager;
             this.productionManager = productionManager;
-            this.squadRepo = squadRep;
-
-            // Tactics
-            this.attackModule = attackModule;
-            this.economyModule = economyModule;
-            this.airModule = airModule;
+            this.squadRepo = squadRepo;
+            this.rawManager = rawManager;
         }
 
         #region Framework hooks
 
-        // Called after connection is established to the StarCraft II Client, but before a game is entered.
         public void Initialize() { }
 
-        // Called on the first frame in each game.
         public void OnStart()
         {
+            snapshot = new StateSnapshot();
+            snapshot.UpdateState(intelManager);
+
             activeTactics = new List<IReplaceableModule>();
 
-            FindStartingLocations();
-            attackModule.enemyPositions = enemyStartLocations;
-            airModule.enemyPositions = enemyStartLocations;
-
-            AddTactic(economyModule);
-            economyModule.mode = EconomyMode.FillExisting;
+            economyModule = new EconomyModule(snapshot, intelManager, productionManager, combatManager, rawManager);
+            abathur.AddToGameloop(economyModule);
 
             intelManager.Handler.RegisterHandler(Case.StructureAddedSelf, OnStructureBuilt);
+
+            // Startup Queue
+            productionManager.QueueUnit(BlizzardConstants.Unit.SCV, lowPriority: false);
+            productionManager.QueueUnit(BlizzardConstants.Unit.SCV, lowPriority: false);
+            productionManager.QueueUnit(BlizzardConstants.Unit.SupplyDepot, lowPriority: false, spacing: 1);
+            productionManager.QueueUnit(BlizzardConstants.Unit.Refinery, lowPriority: false);
+            productionManager.QueueUnit(BlizzardConstants.Unit.SCV, lowPriority: false);
+            productionManager.QueueUnit(BlizzardConstants.Unit.Barracks, lowPriority: false, spacing: 3);
+            productionManager.QueueUnit(BlizzardConstants.Unit.SupplyDepot, lowPriority: true, spacing: 1);
+            productionManager.QueueUnit(BlizzardConstants.Unit.SCV, lowPriority: false);
+            productionManager.QueueUnit(BlizzardConstants.Unit.BarracksTechLab, lowPriority: false);
+            productionManager.QueueUnit(BlizzardConstants.Unit.SCV, lowPriority: false);
+            productionManager.QueueUnit(BlizzardConstants.Unit.SCV, lowPriority: false);
+            productionManager.QueueUnit(BlizzardConstants.Unit.Barracks, lowPriority: false, spacing: 3);
+            productionManager.QueueUnit(BlizzardConstants.Unit.SCV, lowPriority: false);
+            productionManager.QueueUnit(BlizzardConstants.Unit.BarracksReactor, lowPriority: false);
+            productionManager.QueueTech(BlizzardConstants.Research.CombatShield, lowPriority: false);
         }
 
-        // Called in every frame - except the first (use OnStart).
-        // This method is called asynchronous if the framework IsParallelized is true in the setup file.
         public void OnStep() 
         {
+            snapshot.UpdateState(intelManager);
+
             if (intelManager.GameLoop % 100 == 0)
             {
-                Helpers.PrintProductionQueue(intelManager);
-                activeTactics.ForEach(t => Console.WriteLine(t.GetType()));
+				Console.WriteLine("Attacking: " + snapshot.Attacking);
+				Helpers.PrintProductionQueue(intelManager);
+				activeTactics.ForEach(t => Console.WriteLine(t.GetType().Name));
+				
             }
+            
+            // 0. Build basic econ and defense
+            startupSequenceDone = CheckStartupDone();
 
+            // 1. Assess threats? (10%)
+            var ownUnitCount = intelManager.UnitsSelf().Count();
+            var enemyUnitCount = intelManager.UnitsEnemy().Count();
+            if (snapshot.BaseThreats.Sum(kv => kv.Value.Count) > (0.2 * ownUnitCount))
+			{
+                snapshot.Attacking = false;
+                snapshot.EconomyMode = EconomyMode.Standby;
+            }
+            else if (ownUnitCount > enemyUnitCount)
+			{
+                snapshot.Attacking = true;
+                snapshot.EconomyMode = EconomyMode.Expand;
+            } 
+            else
+			{
+                snapshot.Attacking = false;  // Build up as default
+                snapshot.EconomyMode = EconomyMode.Expand;
+			}
 
-            if (intelManager.GameLoop == 600) // After 1 minute?
+            // 2. Coordinate modules
+            if (intelManager.StructuresSelf(BlizzardConstants.Unit.Barracks).Any()
+                    && !TacticActive(typeof(InfantryModule)))
             {
-                AddTactic(attackModule);
-                economyModule.mode = EconomyMode.Expand;
+                AddTactic(new InfantryModule(snapshot, intelManager, productionManager, combatManager, squadRepo));
             }
 
-            if (intelManager.GameLoop == 4000)
+            if (startupSequenceDone) 
             {
-                RemoveTactic(attackModule);
-                RemoveTactic(economyModule);
-                AddTactic(airModule);
-            }
+                if (!infantryUpgraded)
+                {
+                    QueueInfantryUpgrades();
+                    infantryUpgraded = true;
+                }
 
-            if (!isBoostingSupply && intelManager.ProductionQueue.Count() > 10 
-                && intelManager.Common.FoodCap - intelManager.Common.FoodUsed < 5)
-            {
-                // We need to prioritize supply first
-                isBoostingSupply = true;
-                productionManager.ClearBuildOrder();
-                productionManager.QueueUnit(BlizzardConstants.Unit.SupplyDepot);
-                return;
+                if (intelManager.GameLoop > 600 // 1 m 30 sec?
+                    && !TacticActive(typeof(MechModule)))  
+				{
+                    AddTactic(new MechModule(snapshot, intelManager, productionManager, combatManager, squadRepo));
+                }
+
+                if (intelManager.GameLoop > 1800 // 3 m?
+                    && !TacticActive(typeof(AirModule)))
+                {
+                    AddTactic(new AirModule(snapshot, intelManager, productionManager, combatManager, squadRepo));
+                }
             }
+        }
+
+        private bool CheckStartupDone()
+        {
+            if (!startupSequenceDone)
+            {
+                // Call it a bit early, in case we get rushed
+                var lab = intelManager.StructuresSelf(BlizzardConstants.Unit.BarracksTechLab).FirstOrDefault();
+                return Helpers.BuildCompleted(lab);
+            }
+            return true;
         }
 
         public void OnGameEnded() { }
@@ -110,12 +159,6 @@ namespace SC2Abathur.Modules {
         public void OnRestart() { }
 
         #endregion
-
-        private void FindStartingLocations()
-        {
-            // Colonies marked with starting location are possible starting locations of the enemy, never yourself
-            enemyStartLocations = intelManager.Colonies.Where(c => c.IsStartingLocation);
-        }
 
         private void AddTactic(IReplaceableModule tactic)
         {
@@ -134,12 +177,22 @@ namespace SC2Abathur.Modules {
             switch(structure.UnitType)
             {
                 case BlizzardConstants.Unit.SupplyDepot:
-                    if (!intelManager.ProductionQueue.Any(u => u.UnitId == BlizzardConstants.Unit.SupplyDepot))
-                        isBoostingSupply = false;
                     break;
                 default:
                     break;
             }
         }
+
+        private void QueueInfantryUpgrades()
+        {
+            if (!intelManager.UpgradesSelf.Any(u => u.UpgradeId == BlizzardConstants.Research.CombatShield))
+                productionManager.QueueTech(BlizzardConstants.Research.CombatShield);
+
+            if (!intelManager.UpgradesSelf.Any(u => u.UpgradeId == BlizzardConstants.Research.ConcussiveShells))
+                productionManager.QueueTech(BlizzardConstants.Research.ConcussiveShells, lowPriority: true);
+        }
+
+        private bool TacticActive(Type tacticType) => activeTactics.Any(t => t.GetType() == tacticType);
     }
+
 }

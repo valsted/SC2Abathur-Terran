@@ -31,5 +31,16 @@ namespace Abathur.Extensions {
 
         public static double Distance(this Point2D point, float x, float y) => System.Math.Sqrt(FastDistance(point, x, y));
         public static double Distance(this Point2D point, Point2D otherPoint) => System.Math.Sqrt(FastDistance(point, otherPoint));
+
+        public static Point2D AverageWith(this Point2D point, Point2D otherPoint)
+		{
+            var x = (point.X + otherPoint.X) / 2;
+            var y = (point.Y + otherPoint.Y) / 2;
+            return new Point2D()
+            {
+                X = x, 
+                Y = y
+            };
+		}
     }
 }
